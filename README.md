@@ -37,18 +37,23 @@
 
 ### 📥 Starting Guide
 
-#### Cách 1: Chạy trực tiếp (Recommend for Dev)
-```bash
-# Backend
-cd backend ; .venv\Scripts\activate ; pip install -r requirements.txt ; python main.py
-
-# Frontend
-cd frontend ; npm install ; npm run dev
-```
-
-#### Cách 2: Chạy bằng Docker (Fast & Uniform)
+#### Cách 1: Chạy bằng Docker (nhanh nhất)
 ```bash
 docker-compose up --build
+```
+
+#### Cách 2: Chạy thủ công từng thư mục
+```bash
+# Backend
+cd backend
+.venv\Scripts\activate
+pip install -r requirements.txt
+python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+# Frontend
+cd frontend
+npm install
+npm run dev
 ```
 
 <p align="center"><i>Phát triển bởi team QuantumBug cho cuộc thi GDGOC tại Đại học Sài Gòn.</i></p>

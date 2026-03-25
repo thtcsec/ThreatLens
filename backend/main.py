@@ -14,7 +14,11 @@ from core.gemini_service import GeminiConfigError, GeminiGenerationError, Gemini
 from core.risk_store import RiskStoreQueryError, build_risk_report, record_from_metadata
 from core.vector_store import RetrievedContext, VectorKnowledgeStore, VectorStoreConfigError, VectorStoreQueryError
 
-load_dotenv()
+load_dotenv(
+    # Load env from repo root so it works both when running from `backend/`
+    # and when using `docker-compose` with `env_file: - .env`.
+    dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env")
+)
 
 app = FastAPI(title="ThreatLens API", version="0.1.0")
 

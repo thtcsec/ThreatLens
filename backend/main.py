@@ -26,6 +26,16 @@ app = FastAPI(title="ThreatLens API", version="0.1.0")
 RiskLevel = Literal["critical", "high", "medium", "low"]
 
 
+class FrameworkCheck(BaseModel):
+    id: str
+    severity: RiskLevel
+    owasp: Optional[str] = None
+    cwe: Optional[str] = None
+    title: str
+    evidence: str
+    recommendation: str
+
+
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000)
 
@@ -36,7 +46,7 @@ class ChatResponse(BaseModel):
     riskLevel: RiskLevel
     tags: List[str]
     recommendations: List[str]
-    frameworkChecks: List[str] = []
+    frameworkChecks: List[FrameworkCheck] = []
     createdAt: str
 
 
@@ -197,64 +207,155 @@ def _build_recommendations() -> List[str]:
         "Add SAST/DAST checks in CI pipeline",
     ]
 
-def _quick_framework_scan(message: str, contexts: List[RetrievedContext]) -> List[str]:
+def _quick_framework_scan(message: str, contexts: List[RetrievedContext]) -> List[FrameworkCheck]:
     """
     Quick rule-based OWASP/CWE-inspired checks.
     (MVP: deterministic, lightweight; doesn't replace Gemini/RAG.)
     """
     msg = (message or "").lower()
 
-    context_categories = set()
+    context_categories: set[str] = set()
     for item in contexts:
         cat = str(item.metadata.get("category") or item.metadata.get("owasp_category") or "").strip().lower()
         if cat:
             context_categories.add(cat)
 
-    def has_any(tokens: List[str]) -> bool:
-        return any(t in msg for t in tokens)
+    def find_any(tokens: List[str]) -> Optional[str]:
+        for t in tokens:
+            if t in msg:
+                return t
+        return None
 
-    checks: List[str] = []
+    def context_has_any(substrs: List[str]) -> bool:
+        return any(any(k in c for k in substrs) for c in context_categories)
 
-    # Injection (SQL/NoSQL/Command)
+    checks: List[FrameworkCheck] = []
+
+    # Injection (SQL/Command)
     injection_tokens = [
-        "sql", "injection", "union select", "drop table", "or 1=1", "select ", "where ", "cursor.execute",
-        "execute(", "raw query", "parameterized", "prepared statement",
+        "sql",
+        "injection",
+        "union select",
+        "drop table",
+        "or 1=1",
+        "cursor.execute",
+        "execute(",
+        "raw query",
+        "command injection",
     ]
-    if has_any(injection_tokens) or any(any(k in c for k in ["sql", "injection", "nosql", "command"]) for c in context_categories):
+    injection_evidence = find_any(injection_tokens)
+    if injection_evidence or context_has_any(["sql", "injection", "nosql", "command"]):
         checks.append(
-            "OWASP A03: Injection (CWE-89/CWE-90): Consider potential query/command injection; use parameterized queries/ORM and avoid string concatenation."
+            FrameworkCheck(
+                id="owasp-a03-injection",
+                severity="critical" if injection_evidence else "high",
+                owasp="A03",
+                cwe="CWE-89/CWE-90",
+                title="Injection (SQL/Command) quick gate",
+                evidence=injection_evidence or "context-category indicates injection-like behavior",
+                recommendation="Use parameterized queries/ORM and avoid building SQL/commands from strings.",
+            )
         )
 
     # XSS
-    xss_tokens = ["xss", "<script", "innerhtml", "outerhtml", "dangerouslysetinnerhtml", "onerror=", "document.cookie"]
-    if has_any(xss_tokens) or any("xss" in c or "cross-site" in c for c in context_categories):
+    xss_tokens = [
+        "xss",
+        "<script",
+        "innerhtml",
+        "outerhtml",
+        "dangerouslysetinnerhtml",
+        "onerror=",
+        "document.cookie",
+    ]
+    xss_evidence = find_any(xss_tokens)
+    if xss_evidence or context_has_any(["xss", "cross-site"]):
         checks.append(
-            "OWASP A07: Cross-Site Scripting (CWE-79): Ensure output encoding + sanitize HTML/JS and avoid inserting untrusted content as HTML."
+            FrameworkCheck(
+                id="owasp-a07-xss",
+                severity="high" if xss_evidence else "medium",
+                owasp="A07",
+                cwe="CWE-79",
+                title="XSS quick gate",
+                evidence=xss_evidence or "context-category indicates XSS-like risk",
+                recommendation="Encode output, sanitize HTML/JS, and avoid inserting untrusted content as HTML.",
+            )
         )
 
     # Auth / Broken Access Control
-    auth_tokens = ["csrf", "jwt", "oauth", "session", "role", "permission", "access control", "authorization", "rbac", "rbac"]
-    if has_any(auth_tokens) or any(any(k in c for k in ["auth", "access", "authorization", "broken auth", "bacc"]) for c in context_categories):
+    auth_tokens = [
+        "csrf",
+        "jwt",
+        "oauth",
+        "session",
+        "role",
+        "permission",
+        "access control",
+        "authorization",
+        "rbac",
+        "broken auth",
+        "bacc",
+    ]
+    auth_evidence = find_any(auth_tokens)
+    if auth_evidence or context_has_any(["auth", "access", "authorization", "broken auth", "bacc"]):
         checks.append(
-            "OWASP A01: Broken Access Control (CWE-284): Enforce server-side authz checks per action; validate tokens and add CSRF protection for state-changing requests."
+            FrameworkCheck(
+                id="owasp-a01-broken-access-control",
+                severity="high" if auth_evidence else "medium",
+                owasp="A01",
+                cwe="CWE-284",
+                title="Broken Access Control / Auth quick gate",
+                evidence=auth_evidence or "context-category indicates authz/auth risk",
+                recommendation="Enforce server-side authorization per action; validate tokens and add CSRF protection.",
+            )
         )
 
     # Secrets / Sensitive data exposure
-    secret_tokens = ["api key", "apikey", "secret", "password", "token", "authorization header", "bearer ", "aws_key", "gcp_key"]
-    if has_any(secret_tokens) or any(any(k in c for k in ["secret", "credential", "token"]) for c in context_categories):
+    secret_tokens = [
+        "api key",
+        "apikey",
+        "secret",
+        "password",
+        "token",
+        "authorization header",
+        "bearer ",
+        "aws_key",
+        "gcp_key",
+    ]
+    secret_evidence = find_any(secret_tokens)
+    if secret_evidence or context_has_any(["secret", "credential", "token"]):
         checks.append(
-            "OWASP A02: Cryptographic Failures & Sensitive Data (CWE-522/CWE-359): Never log secrets; store credentials in env/secret manager and rotate keys regularly."
+            FrameworkCheck(
+                id="owasp-a02-sensitive-data",
+                severity="critical" if secret_evidence else "high",
+                owasp="A02",
+                cwe="CWE-522/CWE-359",
+                title="Sensitive Data / Secrets quick gate",
+                evidence=secret_evidence or "context-category indicates secret/credential exposure risk",
+                recommendation="Never log secrets; use env/secret manager and rotate keys regularly.",
+            )
         )
 
     # Baseline secure coding checklist (always include at least 1)
-    baseline = (
-        "Baseline quick gate: input validation + output encoding, parameterized DB operations, safe error handling (no stack traces), least-privilege, rate limiting, and security tests in CI."
-    )
-
     if not checks:
-        checks.append("No obvious OWASP token patterns detected from your message; still apply the baseline secure coding checklist.")
+        checks.append(
+            FrameworkCheck(
+                id="no-token-patterns",
+                severity="low",
+                title="No obvious OWASP token patterns detected",
+                evidence="not enough obvious indicators in your message",
+                recommendation="Still apply the baseline secure-coding gate and verify with deeper security testing.",
+            )
+        )
 
-    checks.append(baseline)
+    checks.append(
+        FrameworkCheck(
+            id="baseline-secure-coding",
+            severity="low",
+            title="Baseline secure-coding gate",
+            evidence="always-on",
+            recommendation="Validate inputs, encode outputs, use parameterized DB operations, avoid stack traces in errors, least privilege, rate limiting, and security tests in CI.",
+        )
+    )
 
     # cap for UI
     return checks[:6]
@@ -374,6 +475,7 @@ async def chat(payload: ChatRequest):
     tags = _build_tags(contexts)
     recommendations = _build_recommendations()
     framework_checks = _quick_framework_scan(payload.message, contexts)
+    framework_checks_payload = [c.model_dump() for c in framework_checks]
 
     try:
         gemini = GeminiSecurityService()
@@ -425,7 +527,7 @@ async def chat_stream(payload: ChatRequest):
                 "riskLevel": risk_level,
                 "tags": tags,
                 "recommendations": recommendations,
-                "frameworkChecks": framework_checks,
+                "frameworkChecks": framework_checks_payload,
                 "retrievedCount": len(contexts),
             },
         )
@@ -444,7 +546,7 @@ async def chat_stream(payload: ChatRequest):
                     "riskLevel": risk_level,
                     "tags": tags,
                     "recommendations": recommendations,
-                    "frameworkChecks": framework_checks,
+                    "frameworkChecks": framework_checks_payload,
                     "reply": "".join(full_text),
                 },
             )
@@ -461,7 +563,7 @@ async def chat_stream(payload: ChatRequest):
                         "riskLevel": risk_level,
                         "tags": tags,
                         "recommendations": recommendations,
-                        "frameworkChecks": framework_checks,
+                        "frameworkChecks": framework_checks_payload,
                         "reply": fallback_reply,
                     },
                 )

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { sendChatMessage, streamChatMessage } from "@/lib/backend";
-import { ChatResponse, ChatStreamMeta } from "@/types";
+import { ChatResponse, ChatStreamMeta, FrameworkCheck } from "@/types";
 import { ChatMessage } from "@/types";
 
 const QUICK_PROMPTS = [
@@ -45,6 +45,19 @@ function createMessage(role: ChatMessage["role"], content: string): ChatMessage 
     content,
     createdAt: new Date().toISOString()
   };
+}
+
+function formatFrameworkChecks(checks: FrameworkCheck[]): string {
+  if (!checks?.length) return "No security framework checks found.";
+
+  return checks
+    .map((c) => {
+      const evidence = c.evidence ? `Evidence: ${c.evidence}` : "";
+      const owasp = c.owasp ? `OWASP: ${c.owasp}${c.cwe ? ` (${c.cwe})` : ""}` : "";
+      const head = `[${c.severity.toUpperCase()}] ${c.title}${owasp ? ` - ${owasp}` : ""}`;
+      return [head, evidence, `Fix: ${c.recommendation}`].filter(Boolean).join("\n");
+    })
+    .join("\n\n");
 }
 
 export default function ChatPanel() {
@@ -110,7 +123,7 @@ export default function ChatPanel() {
                 `Risk Level: ${finalMeta.riskLevel.toUpperCase()}`,
                 `Tags: ${finalMeta.tags.join(", ")}`,
                 `Recommendations: ${finalMeta.recommendations.join(" | ")}`,
-                `Security Framework Quick Checks:\n${finalMeta.frameworkChecks.map((c) => `- ${c}`).join("\n")}`
+                `Security Framework Quick Checks:\n${formatFrameworkChecks(finalMeta.frameworkChecks)}`
               ].join("\n");
 
               return {
@@ -130,7 +143,7 @@ export default function ChatPanel() {
           `Risk Level: ${payload.riskLevel.toUpperCase()}`,
           `Tags: ${payload.tags.join(", ")}`,
           `Recommendations: ${payload.recommendations.join(" | ")}`,
-          `Security Framework Quick Checks:\n${payload.frameworkChecks.map((c) => `- ${c}`).join("\n")}`
+          `Security Framework Quick Checks:\n${formatFrameworkChecks(payload.frameworkChecks)}`
         ].join("\n");
 
         setMessages((prev) =>

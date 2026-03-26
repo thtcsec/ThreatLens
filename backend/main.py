@@ -36,6 +36,7 @@ class ChatResponse(BaseModel):
     riskLevel: RiskLevel
     tags: List[str]
     recommendations: List[str]
+    frameworkChecks: List[str] = []
     createdAt: str
 
 
@@ -196,6 +197,68 @@ def _build_recommendations() -> List[str]:
         "Add SAST/DAST checks in CI pipeline",
     ]
 
+def _quick_framework_scan(message: str, contexts: List[RetrievedContext]) -> List[str]:
+    """
+    Quick rule-based OWASP/CWE-inspired checks.
+    (MVP: deterministic, lightweight; doesn't replace Gemini/RAG.)
+    """
+    msg = (message or "").lower()
+
+    context_categories = set()
+    for item in contexts:
+        cat = str(item.metadata.get("category") or item.metadata.get("owasp_category") or "").strip().lower()
+        if cat:
+            context_categories.add(cat)
+
+    def has_any(tokens: List[str]) -> bool:
+        return any(t in msg for t in tokens)
+
+    checks: List[str] = []
+
+    # Injection (SQL/NoSQL/Command)
+    injection_tokens = [
+        "sql", "injection", "union select", "drop table", "or 1=1", "select ", "where ", "cursor.execute",
+        "execute(", "raw query", "parameterized", "prepared statement",
+    ]
+    if has_any(injection_tokens) or any(any(k in c for k in ["sql", "injection", "nosql", "command"]) for c in context_categories):
+        checks.append(
+            "OWASP A03: Injection (CWE-89/CWE-90): Consider potential query/command injection; use parameterized queries/ORM and avoid string concatenation."
+        )
+
+    # XSS
+    xss_tokens = ["xss", "<script", "innerhtml", "outerhtml", "dangerouslysetinnerhtml", "onerror=", "document.cookie"]
+    if has_any(xss_tokens) or any("xss" in c or "cross-site" in c for c in context_categories):
+        checks.append(
+            "OWASP A07: Cross-Site Scripting (CWE-79): Ensure output encoding + sanitize HTML/JS and avoid inserting untrusted content as HTML."
+        )
+
+    # Auth / Broken Access Control
+    auth_tokens = ["csrf", "jwt", "oauth", "session", "role", "permission", "access control", "authorization", "rbac", "rbac"]
+    if has_any(auth_tokens) or any(any(k in c for k in ["auth", "access", "authorization", "broken auth", "bacc"]) for c in context_categories):
+        checks.append(
+            "OWASP A01: Broken Access Control (CWE-284): Enforce server-side authz checks per action; validate tokens and add CSRF protection for state-changing requests."
+        )
+
+    # Secrets / Sensitive data exposure
+    secret_tokens = ["api key", "apikey", "secret", "password", "token", "authorization header", "bearer ", "aws_key", "gcp_key"]
+    if has_any(secret_tokens) or any(any(k in c for k in ["secret", "credential", "token"]) for c in context_categories):
+        checks.append(
+            "OWASP A02: Cryptographic Failures & Sensitive Data (CWE-522/CWE-359): Never log secrets; store credentials in env/secret manager and rotate keys regularly."
+        )
+
+    # Baseline secure coding checklist (always include at least 1)
+    baseline = (
+        "Baseline quick gate: input validation + output encoding, parameterized DB operations, safe error handling (no stack traces), least-privilege, rate limiting, and security tests in CI."
+    )
+
+    if not checks:
+        checks.append("No obvious OWASP token patterns detected from your message; still apply the baseline secure coding checklist.")
+
+    checks.append(baseline)
+
+    # cap for UI
+    return checks[:6]
+
 
 def _build_empty_risk_report() -> Dict[str, Any]:
     now = datetime.now(tz=timezone.utc)
@@ -310,6 +373,7 @@ async def chat(payload: ChatRequest):
     risk_level = _infer_risk_from_contexts(payload.message, contexts)
     tags = _build_tags(contexts)
     recommendations = _build_recommendations()
+    framework_checks = _quick_framework_scan(payload.message, contexts)
 
     try:
         gemini = GeminiSecurityService()
@@ -329,6 +393,7 @@ async def chat(payload: ChatRequest):
         riskLevel=risk_level,
         tags=tags,
         recommendations=recommendations,
+        frameworkChecks=framework_checks,
         createdAt=datetime.now(tz=timezone.utc).isoformat(),
     )
 
@@ -350,6 +415,7 @@ async def chat_stream(payload: ChatRequest):
     risk_level = _infer_risk_from_contexts(payload.message, contexts)
     tags = _build_tags(contexts)
     recommendations = _build_recommendations()
+    framework_checks = _quick_framework_scan(payload.message, contexts)
 
     async def event_generator():
         yield _sse(
@@ -359,6 +425,7 @@ async def chat_stream(payload: ChatRequest):
                 "riskLevel": risk_level,
                 "tags": tags,
                 "recommendations": recommendations,
+                "frameworkChecks": framework_checks,
                 "retrievedCount": len(contexts),
             },
         )
@@ -377,6 +444,7 @@ async def chat_stream(payload: ChatRequest):
                     "riskLevel": risk_level,
                     "tags": tags,
                     "recommendations": recommendations,
+                    "frameworkChecks": framework_checks,
                     "reply": "".join(full_text),
                 },
             )
@@ -393,6 +461,7 @@ async def chat_stream(payload: ChatRequest):
                         "riskLevel": risk_level,
                         "tags": tags,
                         "recommendations": recommendations,
+                        "frameworkChecks": framework_checks,
                         "reply": fallback_reply,
                     },
                 )

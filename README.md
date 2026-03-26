@@ -56,4 +56,4 @@ npm install
 npm run dev
 ```
 
-<p align="center"><i>Phát triển bởi team QuantumBug cho cuộc thi GDGOC tại Đại học Sài Gòn.</i></p>
+<p align="center"><i>Phát triển bởi team QuantumBug cho cuộc thi GDGOC tại Trường Đại học Sài Gòn.</i></p>

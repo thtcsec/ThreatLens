@@ -101,14 +101,16 @@ export default function ChatPanel() {
               const finalMeta = streamMeta || {
                 riskLevel: finalPayload.riskLevel,
                 tags: finalPayload.tags,
-                recommendations: finalPayload.recommendations
+                recommendations: finalPayload.recommendations,
+                frameworkChecks: finalPayload.frameworkChecks
               };
 
               const metadataBlock = [
                 "",
                 `Risk Level: ${finalMeta.riskLevel.toUpperCase()}`,
                 `Tags: ${finalMeta.tags.join(", ")}`,
-                `Recommendations: ${finalMeta.recommendations.join(" | ")}`
+                `Recommendations: ${finalMeta.recommendations.join(" | ")}`,
+                `Security Framework Quick Checks:\n${finalMeta.frameworkChecks.map((c) => `- ${c}`).join("\n")}`
               ].join("\n");
 
               return {
@@ -127,7 +129,8 @@ export default function ChatPanel() {
           "",
           `Risk Level: ${payload.riskLevel.toUpperCase()}`,
           `Tags: ${payload.tags.join(", ")}`,
-          `Recommendations: ${payload.recommendations.join(" | ")}`
+          `Recommendations: ${payload.recommendations.join(" | ")}`,
+          `Security Framework Quick Checks:\n${payload.frameworkChecks.map((c) => `- ${c}`).join("\n")}`
         ].join("\n");
 
         setMessages((prev) =>

@@ -47,6 +47,7 @@ export interface ChatResponse {
   riskLevel: RiskLevel;
   tags: string[];
   recommendations: string[];
+  frameworkChecks: string[];
   createdAt: string;
 }
 
@@ -55,5 +56,6 @@ export interface ChatStreamMeta {
   riskLevel: RiskLevel;
   tags: string[];
   recommendations: string[];
+  frameworkChecks: string[];
   retrievedCount: number;
 }

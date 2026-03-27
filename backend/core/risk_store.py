@@ -129,30 +129,56 @@ class PineconeRiskStore:
     def _init_index(self):
         api_key = os.getenv("VECTOR_DB_API_KEY") or os.getenv("PINECONE_API_KEY")
         index_name = os.getenv("VECTOR_DB_INDEX") or os.getenv("PINECONE_INDEX_NAME")
-        host = os.getenv("PINECONE_HOST")
+        host = self._normalize_pinecone_host(os.getenv("PINECONE_HOST"))
 
         if not api_key:
             raise RiskStoreConfigError("Missing VECTOR_DB_API_KEY (or PINECONE_API_KEY)")
+        if self._looks_like_placeholder(api_key):
+            raise RiskStoreConfigError(
+                "VECTOR_DB_API_KEY is still a placeholder. Replace it with a real Pinecone API key."
+            )
 
         if not index_name and not host:
             raise RiskStoreConfigError("Missing VECTOR_DB_INDEX/PINECONE_INDEX_NAME or PINECONE_HOST")
 
         try:
             from pinecone import Pinecone
+        except Exception as exc:
+            raise RiskStoreConfigError(
+                "Cannot import Pinecone SDK. Run `pip uninstall -y pinecone-client` then `pip install pinecone`."
+            ) from exc
 
+        try:
             client = Pinecone(api_key=api_key)
             if host:
                 return client.Index(host=host)
             return client.Index(index_name)
-        except Exception:
-            try:
-                import pinecone
+        except Exception as exc:
+            raise RiskStoreConfigError(f"Cannot initialize Pinecone client: {exc}") from exc
 
-                environment = os.getenv("PINECONE_ENVIRONMENT")
-                pinecone.init(api_key=api_key, environment=environment)
-                return pinecone.Index(index_name)
-            except Exception as exc:
-                raise RiskStoreConfigError(f"Cannot initialize Pinecone client: {exc}") from exc
+    def _normalize_pinecone_host(self, host_value: str | None) -> str:
+        raw = str(host_value or "").strip()
+        if not raw:
+            return ""
+
+        lowered = raw.lower()
+        placeholder_tokens = ("replace_with_host", "replace", "your_", "example")
+        if any(token in lowered for token in placeholder_tokens):
+            return ""
+
+        if lowered.startswith("https://"):
+            raw = raw[8:]
+        elif lowered.startswith("http://"):
+            raw = raw[7:]
+
+        return raw.split("/", 1)[0].strip()
+
+    def _looks_like_placeholder(self, value: str) -> bool:
+        text = str(value or "").strip().lower()
+        if not text:
+            return True
+        tokens = ("replace", "your_", "example", "changeme")
+        return any(token in text for token in tokens)
 
     def fetch_records(self) -> List[RiskRecord]:
         try:
@@ -180,7 +206,7 @@ class PineconeRiskStore:
             raise RiskStoreQueryError(f"Failed to query vector store: {exc}") from exc
 
 
-def build_risk_report(records: List[RiskRecord]) -> Dict[str, Any]:
+def build_risk_report(records: List[RiskRecord], selected_project: str | None = None) -> Dict[str, Any]:
     if not records:
         raise RiskStoreQueryError("Vector store query succeeded but returned no risk records")
 
@@ -219,6 +245,16 @@ def build_risk_report(records: List[RiskRecord]) -> Dict[str, Any]:
         + distribution["low"] * 20
     )
     risk_index = round(weighted_total / total_findings)
+
+    recently_ingested_count = sum(
+        1 for record in records if (now - record.occurred_at.astimezone(timezone.utc)) <= timedelta(hours=24)
+    )
+    recently_ingested_data = total_findings > 0 and (recently_ingested_count / total_findings) >= 0.8
+    freshness_note = (
+        "Data recently ingested. Trend may be skewed toward the latest day."
+        if recently_ingested_data
+        else None
+    )
 
     categories: List[Dict[str, Any]] = []
     for name, stat in category_stats.items():
@@ -262,6 +298,10 @@ def build_risk_report(records: List[RiskRecord]) -> Dict[str, Any]:
         "totalFindings": total_findings,
         "projectsScanned": len(projects),
         "riskIndex": risk_index,
+        "selectedProject": selected_project,
+        "availableProjects": sorted(projects),
+        "recentlyIngestedData": recently_ingested_data,
+        "freshnessNote": freshness_note,
         "categories": categories,
         "trend": trend,
         "distribution": [

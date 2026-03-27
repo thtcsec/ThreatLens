@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Iterable, List, Optional
 import os
 
-import google.generativeai as genai
+from google import genai
 
 from core.prompts import ANALYSIS_PROMPT_TEMPLATE, SYSTEM_PROMPT
 
@@ -22,9 +22,9 @@ class GeminiSecurityService:
         if not api_key:
             raise GeminiConfigError("Missing GEMINI_API_KEY")
 
-        model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-        genai.configure(api_key=api_key)
-        self._model = genai.GenerativeModel(model_name=model_name)
+        model_name = str(os.getenv("GEMINI_MODEL", "gemini-2.5-flash")).replace("models/", "").strip()
+        self._model_name = model_name
+        self._client = genai.Client(api_key=api_key)
 
     def _build_prompt(self, user_message: str, contexts: List[str]) -> str:
         context_block = "\n\n".join(contexts) if contexts else "No RAG context found in vector store."
@@ -39,7 +39,10 @@ class GeminiSecurityService:
         prompt = self._build_prompt(user_message, contexts)
 
         try:
-            response = self._model.generate_content(prompt)
+            response = self._client.models.generate_content(
+                model=self._model_name,
+                contents=prompt,
+            )
             text = getattr(response, "text", None)
             if text:
                 return text
@@ -51,7 +54,10 @@ class GeminiSecurityService:
         prompt = self._build_prompt(user_message, contexts)
 
         try:
-            response_stream = self._model.generate_content(prompt, stream=True)
+            response_stream = self._client.models.generate_content_stream(
+                model=self._model_name,
+                contents=prompt,
+            )
             for chunk in response_stream:
                 text = getattr(chunk, "text", "")
                 if text:

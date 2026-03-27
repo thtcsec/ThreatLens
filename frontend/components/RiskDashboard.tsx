@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CartesianGrid,
   Cell,
@@ -16,7 +16,6 @@ import {
 } from "recharts";
 import { getRiskReport } from "@/lib/backend";
 import { formatDate, levelClass, levelLabel } from "@/lib/format";
-import { MOCK_REPORT } from "@/lib/mockData";
 import { RiskReport } from "@/types";
 
 const PIE_COLORS = ["#ff5f5f", "#ff944d", "#f6c54a", "#4ccf8c"];
@@ -25,12 +24,20 @@ export default function RiskDashboard() {
   const [report, setReport] = useState<RiskReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedProject, setSelectedProject] = useState("");
+  const [knownProjects, setKnownProjects] = useState<string[]>([]);
 
   useEffect(() => {
     async function loadReport() {
       try {
-        const payload = await getRiskReport();
+        const payload = await getRiskReport(selectedProject || undefined);
         setReport(payload);
+        if (payload.availableProjects && payload.availableProjects.length > 0) {
+          setKnownProjects((prev) => {
+            const merged = new Set([...prev, ...payload.availableProjects!]);
+            return Array.from(merged).sort();
+          });
+        }
         setError(null);
       } catch (err) {
         setReport(null);
@@ -41,18 +48,10 @@ export default function RiskDashboard() {
     }
 
     void loadReport();
-  }, []);
+  }, [selectedProject]);
 
-  const showingDemoData = !!report && report.totalFindings === 0 && report.categories.length === 0;
-  const displayReport = showingDemoData ? MOCK_REPORT : report;
-
-  const topCategory = useMemo(() => {
-    if (!displayReport?.categories.length) {
-      return "No data";
-    }
-
-    return displayReport.categories[0].category;
-  }, [displayReport]);
+  const displayReport = report;
+  const noRealData = !displayReport || displayReport.totalFindings === 0;
 
   if (loading) {
     return <section className="dashboard card panel">Loading risk report...</section>;
@@ -69,7 +68,40 @@ export default function RiskDashboard() {
 
   return (
     <section className="dashboard">
-      <div className="kpi-grid">
+      <article className="card panel filter-bar">
+        <h2 className="section-title">Project Filter</h2>
+        <div className="project-filter-controls">
+          <select
+            value={selectedProject}
+            onChange={(event) => setSelectedProject(event.target.value)}
+            aria-label="project filter"
+          >
+            <option value="">All projects</option>
+            {knownProjects.map((project) => (
+              <option key={project} value={project}>
+                {project}
+              </option>
+            ))}
+          </select>
+        </div>
+        <small>
+          Active project: {displayReport.selectedProject || "All projects"}
+        </small>
+        {knownProjects.length > 0 ? (
+          <small> Available: {knownProjects.join(", ")}</small>
+        ) : null}
+      </article>
+
+      <article className="card panel explanation-panel">
+        <h2 className="section-title">Metric Explanations</h2>
+        <p><strong>Risk Index:</strong> Weighted average risk score (critical=100, high=75, medium=45, low=20).</p>
+        <p><strong>Total Findings:</strong> Total number of findings retrieved from the vector database for the active filter.</p>
+        <p><strong>Risk Trend:</strong> Day-by-day finding counts over the last 7 days grouped by severity.</p>
+        <p><strong>Risk Distribution:</strong> Severity split of all current findings (Critical/High/Medium/Low).</p>
+        <p><strong>Category Breakdown:</strong> Findings grouped by category with score, count, and dominant severity.</p>
+      </article>
+
+      <div className="kpi-grid kpi-grid-2">
         <article className="card kpi-card">
           <span className="kpi-label">Risk Index</span>
           <strong className="kpi-value">{displayReport.riskIndex}/100</strong>
@@ -78,16 +110,15 @@ export default function RiskDashboard() {
           <span className="kpi-label">Total Findings</span>
           <strong className="kpi-value">{displayReport.totalFindings}</strong>
         </article>
-        <article className="card kpi-card">
-          <span className="kpi-label">Top Risk Family</span>
-          <strong className="kpi-value">{topCategory}</strong>
-        </article>
       </div>
 
       <article className="card panel">
         <h2 className="section-title">Risk Trend (7 days)</h2>
         <small>Last generated: {formatDate(displayReport.generatedAt)}</small>
-        {showingDemoData ? <small> Demo mode: showing sample telemetry.</small> : null}
+        {displayReport.recentlyIngestedData && displayReport.freshnessNote ? (
+          <small className="freshness-note"> {displayReport.freshnessNote}</small>
+        ) : null}
+        {noRealData ? <small> No real findings in the database yet.</small> : null}
         <div className="chart-wrap">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={displayReport.trend} margin={{ top: 20, right: 12, left: -16, bottom: 2 }}>
@@ -153,17 +184,23 @@ export default function RiskDashboard() {
             </tr>
           </thead>
           <tbody>
-            {displayReport.categories.map((item) => (
-              <tr key={item.category}>
-                <td>{item.category}</td>
-                <td>{item.score}</td>
-                <td>{item.findings}</td>
-                <td>
-                  <span className={levelClass(item.level)} />
-                  {levelLabel(item.level)}
-                </td>
+            {displayReport.categories.length > 0 ? (
+              displayReport.categories.map((item) => (
+                <tr key={item.category}>
+                  <td>{item.category}</td>
+                  <td>{item.score}</td>
+                  <td>{item.findings}</td>
+                  <td>
+                    <span className={levelClass(item.level)} />
+                    {levelLabel(item.level)}
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={4}>No category data available from vector DB.</td>
               </tr>
-            ))}
+            )}
           </tbody>
         </table>
       </article>

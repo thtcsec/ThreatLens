@@ -13,13 +13,13 @@ interface BackendErrorPayload {
 async function parseBackendError(response: Response): Promise<string> {
   try {
     const payload = (await response.json()) as BackendErrorPayload;
-    return payload.detail || payload.error || payload.message || "Chat service unavailable";
+    return payload.detail || payload.error || payload.message || "Chat stream unavailable";
   } catch {
     try {
       const text = (await response.text()).trim();
-      return text || "Chat service unavailable";
+      return text || "Chat stream unavailable";
     } catch {
-      return "Chat service unavailable";
+      return "Chat stream unavailable";
     }
   }
 }
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const response = await fetch(`${INTERNAL_BACKEND_URL}${API_PREFIX}/chat`, {
+    const response = await fetch(`${INTERNAL_BACKEND_URL}${API_PREFIX}/chat/stream`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -53,10 +53,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: detail }, { status: response.status });
     }
 
-    const payload = (await response.json()) as unknown;
-    return NextResponse.json(payload, { status: 200 });
+    if (!response.body) {
+      return NextResponse.json({ error: "Stream response body is empty" }, { status: 502 });
+    }
+
+    return new Response(response.body, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive"
+      }
+    });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "Chat service unavailable";
+    const detail = error instanceof Error ? error.message : "Chat stream unavailable";
     return NextResponse.json({ error: detail }, { status: 502 });
   }
 }

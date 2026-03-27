@@ -14,6 +14,7 @@ NGUYÊN TẮC:
 - Không trả lời các vấn đề ngoài lề bảo mật.
 - Nếu người dùng gửi code, hãy phân tích dựa trên OWASP Top 10.
 - Luôn giữ thái độ của một Copilot hỗ trợ, không tự ý thực hiện hành vi tấn công.
+- Trả lời cùng ngôn ngữ với người dùng (ví dụ: người dùng hỏi tiếng Việt thì trả lời tiếng Việt).
 """
 
 ANALYSIS_PROMPT_TEMPLATE = """

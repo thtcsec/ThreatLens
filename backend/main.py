@@ -6,15 +6,16 @@ from typing import Any, Dict, List, Literal, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 import uvicorn
 from dotenv import load_dotenv
 
+from core.chat_history_store import ChatHistoryStore, ChatHistoryStoreError
 from core.gemini_service import GeminiConfigError, GeminiGenerationError, GeminiSecurityService
 from core.risk_store import RiskStoreQueryError, build_risk_report, record_from_metadata
 from core.vector_store import RetrievedContext, VectorKnowledgeStore, VectorStoreConfigError, VectorStoreQueryError
 
-load_dotenv()
+load_dotenv(override=True)
 
 app = FastAPI(title="ThreatLens API", version="0.1.0")
 
@@ -33,6 +34,26 @@ class ChatResponse(BaseModel):
     tags: List[str]
     recommendations: List[str]
     createdAt: str
+
+
+class ChatHistoryItem(BaseModel):
+    id: int
+    createdAt: str
+    question: str
+    answer: str
+    riskLevel: RiskLevel
+    source: str
+    retrievedCount: int
+
+
+class ChatHistoryResponse(BaseModel):
+    total: int
+    page: int
+    pageSize: int
+    keyword: str
+    sort: str
+    count: int
+    items: List[ChatHistoryItem]
 
 
 class RiskCategory(BaseModel):
@@ -60,6 +81,10 @@ class RiskReportResponse(BaseModel):
     totalFindings: int
     projectsScanned: int
     riskIndex: int
+    selectedProject: Optional[str] = None
+    availableProjects: List[str] = []
+    recentlyIngestedData: bool = False
+    freshnessNote: Optional[str] = None
     categories: List[RiskCategory]
     trend: List[RiskTrendPoint]
     distribution: List[RiskDistribution]
@@ -72,7 +97,17 @@ class KnowledgeEvent(BaseModel):
     severity: str = "low"
     project: str = "unknown"
     source: str = "manual"
-    timestamp: Optional[str] = None
+    timestamp: str = Field(..., min_length=1)
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp(cls, value: str) -> str:
+        normalized = str(value).strip().replace("Z", "+00:00")
+        try:
+            datetime.fromisoformat(normalized)
+        except ValueError as exc:
+            raise ValueError("timestamp must be ISO-8601 format, e.g. 2026-03-27T15:30:00Z") from exc
+        return value
 
 
 class KnowledgeUpsertRequest(BaseModel):
@@ -119,6 +154,7 @@ async def root():
             "GET /health",
             "POST /api/v1/knowledge/upsert",
             "POST /api/v1/knowledge/retrieve",
+            "GET /api/v1/chat/history",
             "GET /api/v1/risk-report",
             "POST /api/v1/chat",
             "POST /api/v1/chat/stream",
@@ -202,6 +238,10 @@ def _build_empty_risk_report() -> Dict[str, Any]:
         "totalFindings": 0,
         "projectsScanned": 0,
         "riskIndex": 0,
+        "selectedProject": None,
+        "availableProjects": [],
+        "recentlyIngestedData": False,
+        "freshnessNote": None,
         "categories": [],
         "trend": [
             {
@@ -295,6 +335,7 @@ async def knowledge_retrieve(payload: KnowledgeRetrieveRequest):
 @app.post("/api/v1/chat", response_model=ChatResponse)
 async def chat(payload: ChatRequest):
     contexts: List[RetrievedContext] = []
+    reply_source = "gemini"
 
     try:
         store = VectorKnowledgeStore()
@@ -315,9 +356,25 @@ async def chat(payload: ChatRequest):
     except GeminiGenerationError as exc:
         detail = str(exc)
         if _is_quota_error(detail):
+            reply_source = "fallback"
             reply = _build_fallback_reply(payload.message, contexts, detail)
         else:
             raise HTTPException(status_code=502, detail=detail) from exc
+
+    created_at = datetime.now(tz=timezone.utc).isoformat()
+    try:
+        history_store = ChatHistoryStore()
+        history_store.save_interaction(
+            question=payload.message,
+            answer=reply,
+            risk_level=risk_level,
+            source=reply_source,
+            retrieved_count=len(contexts),
+            created_at=created_at,
+        )
+    except ChatHistoryStoreError:
+        # Keep chat endpoint available even if history persistence fails.
+        pass
 
     return ChatResponse(
         id=f"chat-{int(datetime.now(tz=timezone.utc).timestamp() * 1000)}",
@@ -325,7 +382,7 @@ async def chat(payload: ChatRequest):
         riskLevel=risk_level,
         tags=tags,
         recommendations=recommendations,
-        createdAt=datetime.now(tz=timezone.utc).isoformat(),
+        createdAt=created_at,
     )
 
 
@@ -361,9 +418,24 @@ async def chat_stream(payload: ChatRequest):
 
         try:
             full_text: List[str] = []
+            source = "gemini"
             for text in gemini.stream_analysis(payload.message, _context_to_lines(contexts)):
                 full_text.append(text)
                 yield _sse("chunk", {"text": text})
+
+            full_reply = "".join(full_text)
+            try:
+                history_store = ChatHistoryStore()
+                history_store.save_interaction(
+                    question=payload.message,
+                    answer=full_reply,
+                    risk_level=risk_level,
+                    source=source,
+                    retrieved_count=len(contexts),
+                    created_at=created_at,
+                )
+            except ChatHistoryStoreError:
+                pass
 
             yield _sse(
                 "done",
@@ -373,13 +445,25 @@ async def chat_stream(payload: ChatRequest):
                     "riskLevel": risk_level,
                     "tags": tags,
                     "recommendations": recommendations,
-                    "reply": "".join(full_text),
+                    "reply": full_reply,
                 },
             )
         except GeminiGenerationError as exc:
             detail = str(exc)
             if _is_quota_error(detail):
                 fallback_reply = _build_fallback_reply(payload.message, contexts, detail)
+                try:
+                    history_store = ChatHistoryStore()
+                    history_store.save_interaction(
+                        question=payload.message,
+                        answer=fallback_reply,
+                        risk_level=risk_level,
+                        source="fallback",
+                        retrieved_count=len(contexts),
+                        created_at=created_at,
+                    )
+                except ChatHistoryStoreError:
+                    pass
                 yield _sse("chunk", {"text": fallback_reply})
                 yield _sse(
                     "done",
@@ -398,16 +482,36 @@ async def chat_stream(payload: ChatRequest):
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
+@app.get("/api/v1/chat/history", response_model=ChatHistoryResponse)
+async def chat_history(page: int = 1, pageSize: int = 10, q: str = "", sort: str = "newest"):
+    try:
+        history_store = ChatHistoryStore()
+        result = history_store.query_history(page=page, page_size=pageSize, keyword=q, sort=sort)
+        items = [ChatHistoryItem(**item) for item in result["items"]]
+        return ChatHistoryResponse(
+            total=int(result["total"]),
+            page=int(result["page"]),
+            pageSize=int(result["pageSize"]),
+            keyword=str(result["keyword"]),
+            sort=str(result["sort"]),
+            count=len(items),
+            items=items,
+        )
+    except ChatHistoryStoreError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @app.get("/api/v1/risk-report", response_model=RiskReportResponse)
-async def risk_report():
+async def risk_report(project: Optional[str] = None):
     try:
         store = VectorKnowledgeStore()
         contexts = store.retrieve_context(
             query=os.getenv("RISK_REPORT_QUERY", "recent OWASP vulnerabilities and security incidents"),
             top_k=int(os.getenv("RISK_REPORT_TOP_K", "200")),
+            project=project,
         )
         records = [record_from_metadata(item.metadata) for item in contexts]
-        return RiskReportResponse(**build_risk_report(records))
+        return RiskReportResponse(**build_risk_report(records, selected_project=project))
     except VectorStoreConfigError:
         # Keep dashboard usable even when vector infra is not configured.
         return RiskReportResponse(**_build_empty_risk_report())

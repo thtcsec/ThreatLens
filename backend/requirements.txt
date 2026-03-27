@@ -2,8 +2,9 @@ fastapi
 uvicorn[standard]
 pydantic
 python-dotenv
-google-generativeai
+google-genai
 langchain
-pinecone-client
+pinecone
+chromadb
 python-multipart
 requests

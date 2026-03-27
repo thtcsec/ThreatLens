@@ -13,23 +13,30 @@ interface BackendErrorPayload {
 async function parseBackendError(response: Response): Promise<string> {
   try {
     const payload = (await response.json()) as BackendErrorPayload;
-    return payload.detail || payload.error || payload.message || "Cannot load risk report";
+    return payload.detail || payload.error || payload.message || "Cannot load chat history";
   } catch {
     try {
       const text = (await response.text()).trim();
-      return text || "Cannot load risk report";
+      return text || "Cannot load chat history";
     } catch {
-      return "Cannot load risk report";
+      return "Cannot load chat history";
     }
   }
 }
 
 export async function GET(request: NextRequest) {
-  const project = request.nextUrl.searchParams.get("project")?.trim() || "";
-  const query = project ? `?project=${encodeURIComponent(project)}` : "";
+  const pageParam = request.nextUrl.searchParams.get("page") || "1";
+  const pageSizeParam = request.nextUrl.searchParams.get("pageSize") || "10";
+  const queryParam = request.nextUrl.searchParams.get("q") || "";
+  const sortParam = request.nextUrl.searchParams.get("sort") || "newest";
+  const query =
+    `?page=${encodeURIComponent(pageParam)}` +
+    `&pageSize=${encodeURIComponent(pageSizeParam)}` +
+    `&q=${encodeURIComponent(queryParam)}` +
+    `&sort=${encodeURIComponent(sortParam)}`;
 
   try {
-    const response = await fetch(`${INTERNAL_BACKEND_URL}${API_PREFIX}/risk-report${query}`, {
+    const response = await fetch(`${INTERNAL_BACKEND_URL}${API_PREFIX}/chat/history${query}`, {
       method: "GET",
       cache: "no-store"
     });
@@ -42,6 +49,6 @@ export async function GET(request: NextRequest) {
     const payload = (await response.json()) as unknown;
     return NextResponse.json(payload, { status: 200 });
   } catch {
-    return NextResponse.json({ error: "Cannot load risk report" }, { status: 502 });
+    return NextResponse.json({ error: "Cannot load chat history" }, { status: 502 });
   }
 }

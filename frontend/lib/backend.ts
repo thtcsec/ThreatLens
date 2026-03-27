@@ -1,7 +1,6 @@
-import { ChatRequest, ChatResponse, ChatStreamMeta, RiskReport } from "@/types";
+import { ChatHistoryQueryOptions, ChatHistoryResponse, ChatRequest, ChatResponse, ChatStreamMeta, RiskReport } from "@/types";
 
-const DEFAULT_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
-const API_PREFIX = "/api/v1";
+const FRONTEND_API_PREFIX = "/api";
 
 interface BackendErrorPayload {
   detail?: string;
@@ -32,7 +31,7 @@ async function parseBackendError(response: Response, endpointLabel: string): Pro
 export async function sendChatMessage(message: string): Promise<ChatResponse> {
   const payload: ChatRequest = { message };
 
-  const response = await fetch(`${DEFAULT_BACKEND_URL}${API_PREFIX}/chat`, {
+  const response = await fetch(`${FRONTEND_API_PREFIX}/chat`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -47,8 +46,9 @@ export async function sendChatMessage(message: string): Promise<ChatResponse> {
   return (await response.json()) as ChatResponse;
 }
 
-export async function getRiskReport(): Promise<RiskReport> {
-  const response = await fetch(`${DEFAULT_BACKEND_URL}${API_PREFIX}/risk-report`, {
+export async function getRiskReport(project?: string): Promise<RiskReport> {
+  const query = project?.trim() ? `?project=${encodeURIComponent(project.trim())}` : "";
+  const response = await fetch(`${FRONTEND_API_PREFIX}/risk-report${query}`, {
     method: "GET",
     cache: "no-store"
   });
@@ -60,10 +60,34 @@ export async function getRiskReport(): Promise<RiskReport> {
   return (await response.json()) as RiskReport;
 }
 
+export async function getChatHistory(options: ChatHistoryQueryOptions = {}): Promise<ChatHistoryResponse> {
+  const page = Math.max(1, options.page ?? 1);
+  const pageSize = Math.max(1, Math.min(options.pageSize ?? 10, 100));
+  const keyword = (options.keyword || "").trim();
+  const sort = options.sort === "oldest" ? "oldest" : "newest";
+  const response = await fetch(
+    `${FRONTEND_API_PREFIX}/chat/history?page=${page}&pageSize=${pageSize}&q=${encodeURIComponent(keyword)}&sort=${sort}`,
+    {
+    method: "GET",
+    cache: "no-store"
+    }
+  );
+
+  if (!response.ok) {
+    return parseBackendError(response, "Chat history endpoint");
+  }
+
+  return (await response.json()) as ChatHistoryResponse;
+}
+
 interface StreamHandlers {
   onMeta?: (meta: ChatStreamMeta) => void;
   onChunk: (text: string) => void;
   onDone?: (payload: ChatResponse) => void;
+}
+
+interface StreamOptions {
+  signal?: AbortSignal;
 }
 
 interface ParsedSseEvent {
@@ -114,14 +138,19 @@ function parseSseBlock(block: string): ParsedSseEvent | null {
   }
 }
 
-export async function streamChatMessage(message: string, handlers: StreamHandlers): Promise<void> {
+export async function streamChatMessage(
+  message: string,
+  handlers: StreamHandlers,
+  options: StreamOptions = {}
+): Promise<void> {
   const payload: ChatRequest = { message };
-  const response = await fetch(`${DEFAULT_BACKEND_URL}${API_PREFIX}/chat/stream`, {
+  const response = await fetch(`${FRONTEND_API_PREFIX}/chat/stream`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal: options.signal
   });
 
   if (!response.ok) {

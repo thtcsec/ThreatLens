@@ -51,4 +51,105 @@ cd frontend ; npm install ; npm run dev
 docker-compose up --build
 ```
 
+### 🗄️ Cấu hình Vector DB + Retrieval
+
+#### 1) Chọn provider Vector DB
+Project hỗ trợ 2 cách:
+
+- **Pinecone (cloud)**: dùng cho production/staging.
+- **ChromaDB (local)**: dùng cho dev/test nhanh trên máy cá nhân.
+
+Các biến môi trường chính trong `.env`:
+
+```bash
+# Chọn provider: pinecone | chroma
+VECTOR_DB_PROVIDER=pinecone
+
+# Dùng cho Pinecone
+VECTOR_DB_API_KEY=your_pinecone_key
+VECTOR_DB_INDEX=your_pinecone_index
+VECTOR_DB_NAMESPACE=default
+PINECONE_ENVIRONMENT=your_environment_if_needed
+PINECONE_HOST=
+
+# Dùng cho Chroma local
+CHROMA_DB_PATH=./.chroma
+CHROMA_COLLECTION=threatlens_knowledge
+
+# Embedding model (bắt buộc)
+GEMINI_API_KEY=your_gemini_key
+GEMINI_EMBEDDING_MODEL=gemini-embedding-001
+GEMINI_EMBEDDING_DIMENSION=768
+```
+
+#### 2) Nạp dữ liệu vào Vector DB (Ingestion)
+
+Bạn có thể dùng file mẫu:
+
+```bash
+cd backend
+python scripts/ingest_knowledge.py --file data/sample_security_events.json
+```
+
+Định dạng JSON hỗ trợ:
+
+- `[{...}, {...}]`
+- `{"events": [{...}, {...}]}`
+
+Mỗi event cần tối thiểu trường `content`. Các trường gợi ý:
+`id`, `category`, `severity`, `project`, `source`, `timestamp`.
+
+#### 3) Truy xuất dữ liệu (Retrieval)
+
+Chạy truy vấn từ terminal:
+
+```bash
+cd backend
+python scripts/query_knowledge.py --query "sql injection at login endpoint" --top-k 5
+```
+
+Lọc theo project:
+
+```bash
+python scripts/query_knowledge.py --query "jwt secret leak" --project auth-api --top-k 3
+```
+
+Hoặc trả về JSON:
+
+```bash
+python scripts/query_knowledge.py --query "rate limiting issue" --json
+```
+
+#### 4) API Retrieval (FastAPI)
+
+Nạp dữ liệu qua API:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/knowledge/upsert \
+  -H "Content-Type: application/json" \
+  -d '{
+    "events": [
+      {
+        "content": "Unsanitized input in search endpoint can cause XSS",
+        "category": "Injection",
+        "severity": "high",
+        "project": "portal-web",
+        "source": "manual-review"
+      }
+    ]
+  }'
+```
+
+Truy xuất qua API:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/knowledge/retrieve \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "xss in search endpoint",
+    "topK": 5,
+    "project": "portal-web"
+  }'
+```
+
 <p align="center"><i>Phát triển bởi team QuantumBug cho cuộc thi GDGOC tại Đại học Sài Gòn.</i></p>

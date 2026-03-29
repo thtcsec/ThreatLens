@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
+import { Space_Grotesk, Inter } from "next/font/google";
 import "./globals.css";
 
 const headingFont = Space_Grotesk({
@@ -8,15 +8,15 @@ const headingFont = Space_Grotesk({
   weight: ["500", "700"]
 });
 
-const bodyMono = IBM_Plex_Mono({
+const bodySans = Inter({
   subsets: ["latin"],
   variable: "--font-body",
-  weight: ["400", "500"]
+  weight: ["400", "500", "600"]
 });
 
 export const metadata: Metadata = {
   title: "ThreatLens | Security Copilot",
-  description: "AI chatbot and risk analytics dashboard for secure development workflows."
+  description: "Advanced AI chatbot and risk analytics dashboard for secure development workflows."
 };
 
 export default function RootLayout({
@@ -25,8 +25,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="vi">
-      <body className={`${headingFont.variable} ${bodyMono.variable}`}>{children}</body>
+    <html lang="en">
+      <body className={`${headingFont.variable} ${bodySans.variable}`}>
+        {children}
+      </body>
     </html>
   );
 }

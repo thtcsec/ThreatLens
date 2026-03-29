@@ -1,19 +1,28 @@
 import ChatPanel from "@/components/ChatPanel";
 import RiskDashboard from "@/components/RiskDashboard";
+import CodeScanner from "@/components/CodeScanner";
 
 export default function HomePage() {
   return (
     <main>
       <section className="header card">
-        <h1 className="title">ThreatLens Security Copilot</h1>
+        <h1 className="title">ThreatLens Copilot</h1>
         <p className="subtitle">
-          Chatbot for security guidance and a real-time styled dashboard for risk visibility across your projects.
+          Intelligent Cloud-Native Security Operations. Analyze risks and protect your codebase with real-time AI guidance.
         </p>
       </section>
 
       <section className="app-shell">
-        <ChatPanel />
-        <RiskDashboard />
+        {/* Top Row: Chat + Dashboard */}
+        <div className="top-row">
+          <ChatPanel />
+          <RiskDashboard />
+        </div>
+        
+        {/* Bottom Row: Full Width Scanner */}
+        <div className="bottom-row">
+          <CodeScanner />
+        </div>
       </section>
     </main>
   );

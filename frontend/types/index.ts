@@ -83,6 +83,23 @@ export interface ChatSecurityMetadata {
   riskLevel: RiskLevel;
   tags: string[];
   recommendations: string[];
+  frameworkChecks: FrameworkCheck[];
+  citations: ChatCitation[];
+  confidenceScore: number;
+  needsHumanReview: boolean;
+  verificationNotes: string[];
+}
+
+export interface ChatCitation {
+  id: string;
+  score: number;
+  source: string;
+  project: string;
+  category: string;
+  cveId?: string | null;
+  cweIds: string[];
+  reference?: string | null;
+  publishedAt?: string | null;
 }
 
 export interface ChatRequest {
@@ -96,6 +113,10 @@ export interface ChatResponse {
   tags: string[];
   recommendations: string[];
   frameworkChecks: FrameworkCheck[];
+  citations: ChatCitation[];
+  confidenceScore: number;
+  needsHumanReview: boolean;
+  verificationNotes: string[];
   createdAt: string;
 }
 
@@ -105,5 +126,6 @@ export interface ChatStreamMeta {
   tags: string[];
   recommendations: string[];
   frameworkChecks: FrameworkCheck[];
+  citations: ChatCitation[];
   retrievedCount: number;
 }

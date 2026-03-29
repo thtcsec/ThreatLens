@@ -233,6 +233,21 @@ class VectorKnowledgeStore:
             vector_id = str(event.get("id") or f"risk-{uuid4().hex}")
             timestamp = self._validate_timestamp(event.get("timestamp"), event_number=idx)
             embedding = self._embed_text(content, task_type="retrieval_document")
+            cwe_ids = event.get("cweIds") or []
+            if isinstance(cwe_ids, list):
+                normalized_cwe_ids = [str(item).strip().upper() for item in cwe_ids if str(item).strip()]
+            else:
+                normalized_cwe_ids = []
+
+            references = event.get("references") or []
+            primary_reference = ""
+            if isinstance(references, list):
+                for ref in references:
+                    text_ref = str(ref or "").strip()
+                    if text_ref:
+                        primary_reference = text_ref
+                        break
+
             metadata = {
                 "content": content,
                 "category": str(event.get("category") or "Uncategorized"),
@@ -240,6 +255,11 @@ class VectorKnowledgeStore:
                 "project": str(event.get("project") or "unknown"),
                 "source": str(event.get("source") or "manual"),
                 "timestamp": timestamp,
+                "cve_id": str(event.get("cveId") or "").strip(),
+                "cwe_ids": ",".join(normalized_cwe_ids),
+                "reference": primary_reference,
+                "vendor": str(event.get("vendor") or "").strip(),
+                "published_at": str(event.get("publishedAt") or "").strip(),
             }
             vectors.append({"id": vector_id, "values": embedding, "metadata": metadata, "content": content})
             chroma_ids.append(vector_id)

@@ -17,6 +17,20 @@
 - **📚 Intelligent RAG**: Truy xuất tri thức từ kho dữ liệu CVE, CWE và tiêu chuẩn OWASP mới nhất.
 - **💬 Security Persona**: Trò chuyện với AI dưới vai trò "Cybersecurity Analyst" chuyên nghiệp.
 
+## 🧠 Trusted Feed Ingestion (NVD + CISA KEV)
+- API ingest trusted feed:
+  - `POST /api/v1/knowledge/ingest/trusted`
+  - body mẫu:
+    - `{"includeNvd": true, "includeCisaKev": true, "days": 7, "limitPerFeed": 50, "project": "trusted-feed"}`
+- Script ingest định kỳ:
+  - `cd backend && python scripts/ingest_trusted_feeds.py --days 7 --limit-per-feed 50 --project trusted-feed`
+- Cron ví dụ (chạy mỗi 6 giờ):
+  - `0 */6 * * * cd /path/to/ThreatLens/backend && /usr/bin/python3 scripts/ingest_trusted_feeds.py --days 7 --limit-per-feed 50 --project trusted-feed >> /tmp/threatlens-ingest.log 2>&1`
+
+## ✅ Automated Security Validation Tests
+- Chạy test validator CVE/CWE/reference và verification scoring:
+  - `cd backend && python -m unittest discover -s tests -p 'test_*.py'`
+
 ## 🏗️ Kiến trúc hệ thống
 - **Presentation Layer**: [Next.js](frontend/) - Giao diện Dashboard cao cấp & Chatbot.
 - **Intelligence Service**: [FastAPI](backend/) - AI Engine điều phối luồng RAG.

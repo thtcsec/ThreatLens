@@ -20,6 +20,16 @@ export interface RiskDistribution {
   value: number;
 }
 
+export interface FrameworkCheck {
+  id: string;
+  severity: RiskLevel;
+  owasp?: string | null;
+  cwe?: string | null;
+  title: string;
+  evidence: string;
+  recommendation: string;
+}
+
 export interface RiskReport {
   generatedAt: string;
   totalFindings: number;
@@ -85,6 +95,7 @@ export interface ChatResponse {
   riskLevel: RiskLevel;
   tags: string[];
   recommendations: string[];
+  frameworkChecks: FrameworkCheck[];
   createdAt: string;
 }
 
@@ -93,5 +104,6 @@ export interface ChatStreamMeta {
   riskLevel: RiskLevel;
   tags: string[];
   recommendations: string[];
+  frameworkChecks: FrameworkCheck[];
   retrievedCount: number;
 }

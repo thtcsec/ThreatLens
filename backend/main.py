@@ -6,21 +6,34 @@ from typing import Any, Dict, List, Literal, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 import uvicorn
 from dotenv import load_dotenv
 
-from core.chat_history_store import ChatHistoryStore, ChatHistoryStoreError
 from core.gemini_service import GeminiConfigError, GeminiGenerationError, GeminiSecurityService
 from core.risk_store import RiskStoreQueryError, build_risk_report, record_from_metadata
 from core.vector_store import RetrievedContext, VectorKnowledgeStore, VectorStoreConfigError, VectorStoreQueryError
 
-load_dotenv(override=True)
+load_dotenv(
+    # Load env from repo root so it works both when running from `backend/`
+    # and when using `docker-compose` with `env_file: - .env`.
+    dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env")
+)
 
 app = FastAPI(title="ThreatLens API", version="0.1.0")
 
 
 RiskLevel = Literal["critical", "high", "medium", "low"]
+
+
+class FrameworkCheck(BaseModel):
+    id: str
+    severity: RiskLevel
+    owasp: Optional[str] = None
+    cwe: Optional[str] = None
+    title: str
+    evidence: str
+    recommendation: str
 
 
 class ChatRequest(BaseModel):
@@ -33,27 +46,8 @@ class ChatResponse(BaseModel):
     riskLevel: RiskLevel
     tags: List[str]
     recommendations: List[str]
+    frameworkChecks: List[FrameworkCheck] = []
     createdAt: str
-
-
-class ChatHistoryItem(BaseModel):
-    id: int
-    createdAt: str
-    question: str
-    answer: str
-    riskLevel: RiskLevel
-    source: str
-    retrievedCount: int
-
-
-class ChatHistoryResponse(BaseModel):
-    total: int
-    page: int
-    pageSize: int
-    keyword: str
-    sort: str
-    count: int
-    items: List[ChatHistoryItem]
 
 
 class RiskCategory(BaseModel):
@@ -81,10 +75,6 @@ class RiskReportResponse(BaseModel):
     totalFindings: int
     projectsScanned: int
     riskIndex: int
-    selectedProject: Optional[str] = None
-    availableProjects: List[str] = []
-    recentlyIngestedData: bool = False
-    freshnessNote: Optional[str] = None
     categories: List[RiskCategory]
     trend: List[RiskTrendPoint]
     distribution: List[RiskDistribution]
@@ -97,17 +87,7 @@ class KnowledgeEvent(BaseModel):
     severity: str = "low"
     project: str = "unknown"
     source: str = "manual"
-    timestamp: str = Field(..., min_length=1)
-
-    @field_validator("timestamp")
-    @classmethod
-    def validate_timestamp(cls, value: str) -> str:
-        normalized = str(value).strip().replace("Z", "+00:00")
-        try:
-            datetime.fromisoformat(normalized)
-        except ValueError as exc:
-            raise ValueError("timestamp must be ISO-8601 format, e.g. 2026-03-27T15:30:00Z") from exc
-        return value
+    timestamp: Optional[str] = None
 
 
 class KnowledgeUpsertRequest(BaseModel):
@@ -154,7 +134,6 @@ async def root():
             "GET /health",
             "POST /api/v1/knowledge/upsert",
             "POST /api/v1/knowledge/retrieve",
-            "GET /api/v1/chat/history",
             "GET /api/v1/risk-report",
             "POST /api/v1/chat",
             "POST /api/v1/chat/stream",
@@ -228,6 +207,159 @@ def _build_recommendations() -> List[str]:
         "Add SAST/DAST checks in CI pipeline",
     ]
 
+def _quick_framework_scan(message: str, contexts: List[RetrievedContext]) -> List[FrameworkCheck]:
+    """
+    Quick rule-based OWASP/CWE-inspired checks.
+    (MVP: deterministic, lightweight; doesn't replace Gemini/RAG.)
+    """
+    msg = (message or "").lower()
+
+    context_categories: set[str] = set()
+    for item in contexts:
+        cat = str(item.metadata.get("category") or item.metadata.get("owasp_category") or "").strip().lower()
+        if cat:
+            context_categories.add(cat)
+
+    def find_any(tokens: List[str]) -> Optional[str]:
+        for t in tokens:
+            if t in msg:
+                return t
+        return None
+
+    def context_has_any(substrs: List[str]) -> bool:
+        return any(any(k in c for k in substrs) for c in context_categories)
+
+    checks: List[FrameworkCheck] = []
+
+    # Injection (SQL/Command)
+    injection_tokens = [
+        "sql",
+        "injection",
+        "union select",
+        "drop table",
+        "or 1=1",
+        "cursor.execute",
+        "execute(",
+        "raw query",
+        "command injection",
+    ]
+    injection_evidence = find_any(injection_tokens)
+    if injection_evidence or context_has_any(["sql", "injection", "nosql", "command"]):
+        checks.append(
+            FrameworkCheck(
+                id="owasp-a03-injection",
+                severity="critical" if injection_evidence else "high",
+                owasp="A03",
+                cwe="CWE-89/CWE-90",
+                title="Injection (SQL/Command) quick gate",
+                evidence=injection_evidence or "context-category indicates injection-like behavior",
+                recommendation="Use parameterized queries/ORM and avoid building SQL/commands from strings.",
+            )
+        )
+
+    # XSS
+    xss_tokens = [
+        "xss",
+        "<script",
+        "innerhtml",
+        "outerhtml",
+        "dangerouslysetinnerhtml",
+        "onerror=",
+        "document.cookie",
+    ]
+    xss_evidence = find_any(xss_tokens)
+    if xss_evidence or context_has_any(["xss", "cross-site"]):
+        checks.append(
+            FrameworkCheck(
+                id="owasp-a07-xss",
+                severity="high" if xss_evidence else "medium",
+                owasp="A07",
+                cwe="CWE-79",
+                title="XSS quick gate",
+                evidence=xss_evidence or "context-category indicates XSS-like risk",
+                recommendation="Encode output, sanitize HTML/JS, and avoid inserting untrusted content as HTML.",
+            )
+        )
+
+    # Auth / Broken Access Control
+    auth_tokens = [
+        "csrf",
+        "jwt",
+        "oauth",
+        "session",
+        "role",
+        "permission",
+        "access control",
+        "authorization",
+        "rbac",
+        "broken auth",
+        "bacc",
+    ]
+    auth_evidence = find_any(auth_tokens)
+    if auth_evidence or context_has_any(["auth", "access", "authorization", "broken auth", "bacc"]):
+        checks.append(
+            FrameworkCheck(
+                id="owasp-a01-broken-access-control",
+                severity="high" if auth_evidence else "medium",
+                owasp="A01",
+                cwe="CWE-284",
+                title="Broken Access Control / Auth quick gate",
+                evidence=auth_evidence or "context-category indicates authz/auth risk",
+                recommendation="Enforce server-side authorization per action; validate tokens and add CSRF protection.",
+            )
+        )
+
+    # Secrets / Sensitive data exposure
+    secret_tokens = [
+        "api key",
+        "apikey",
+        "secret",
+        "password",
+        "token",
+        "authorization header",
+        "bearer ",
+        "aws_key",
+        "gcp_key",
+    ]
+    secret_evidence = find_any(secret_tokens)
+    if secret_evidence or context_has_any(["secret", "credential", "token"]):
+        checks.append(
+            FrameworkCheck(
+                id="owasp-a02-sensitive-data",
+                severity="critical" if secret_evidence else "high",
+                owasp="A02",
+                cwe="CWE-522/CWE-359",
+                title="Sensitive Data / Secrets quick gate",
+                evidence=secret_evidence or "context-category indicates secret/credential exposure risk",
+                recommendation="Never log secrets; use env/secret manager and rotate keys regularly.",
+            )
+        )
+
+    # Baseline secure coding checklist (always include at least 1)
+    if not checks:
+        checks.append(
+            FrameworkCheck(
+                id="no-token-patterns",
+                severity="low",
+                title="No obvious OWASP token patterns detected",
+                evidence="not enough obvious indicators in your message",
+                recommendation="Still apply the baseline secure-coding gate and verify with deeper security testing.",
+            )
+        )
+
+    checks.append(
+        FrameworkCheck(
+            id="baseline-secure-coding",
+            severity="low",
+            title="Baseline secure-coding gate",
+            evidence="always-on",
+            recommendation="Validate inputs, encode outputs, use parameterized DB operations, avoid stack traces in errors, least privilege, rate limiting, and security tests in CI.",
+        )
+    )
+
+    # cap for UI
+    return checks[:6]
+
 
 def _build_empty_risk_report() -> Dict[str, Any]:
     now = datetime.now(tz=timezone.utc)
@@ -238,10 +370,6 @@ def _build_empty_risk_report() -> Dict[str, Any]:
         "totalFindings": 0,
         "projectsScanned": 0,
         "riskIndex": 0,
-        "selectedProject": None,
-        "availableProjects": [],
-        "recentlyIngestedData": False,
-        "freshnessNote": None,
         "categories": [],
         "trend": [
             {
@@ -335,7 +463,6 @@ async def knowledge_retrieve(payload: KnowledgeRetrieveRequest):
 @app.post("/api/v1/chat", response_model=ChatResponse)
 async def chat(payload: ChatRequest):
     contexts: List[RetrievedContext] = []
-    reply_source = "gemini"
 
     try:
         store = VectorKnowledgeStore()
@@ -347,6 +474,8 @@ async def chat(payload: ChatRequest):
     risk_level = _infer_risk_from_contexts(payload.message, contexts)
     tags = _build_tags(contexts)
     recommendations = _build_recommendations()
+    framework_checks = _quick_framework_scan(payload.message, contexts)
+    framework_checks_payload = [c.model_dump() for c in framework_checks]
 
     try:
         gemini = GeminiSecurityService()
@@ -356,25 +485,9 @@ async def chat(payload: ChatRequest):
     except GeminiGenerationError as exc:
         detail = str(exc)
         if _is_quota_error(detail):
-            reply_source = "fallback"
             reply = _build_fallback_reply(payload.message, contexts, detail)
         else:
             raise HTTPException(status_code=502, detail=detail) from exc
-
-    created_at = datetime.now(tz=timezone.utc).isoformat()
-    try:
-        history_store = ChatHistoryStore()
-        history_store.save_interaction(
-            question=payload.message,
-            answer=reply,
-            risk_level=risk_level,
-            source=reply_source,
-            retrieved_count=len(contexts),
-            created_at=created_at,
-        )
-    except ChatHistoryStoreError:
-        # Keep chat endpoint available even if history persistence fails.
-        pass
 
     return ChatResponse(
         id=f"chat-{int(datetime.now(tz=timezone.utc).timestamp() * 1000)}",
@@ -382,7 +495,8 @@ async def chat(payload: ChatRequest):
         riskLevel=risk_level,
         tags=tags,
         recommendations=recommendations,
-        createdAt=created_at,
+        frameworkChecks=framework_checks,
+        createdAt=datetime.now(tz=timezone.utc).isoformat(),
     )
 
 
@@ -403,6 +517,7 @@ async def chat_stream(payload: ChatRequest):
     risk_level = _infer_risk_from_contexts(payload.message, contexts)
     tags = _build_tags(contexts)
     recommendations = _build_recommendations()
+    framework_checks = _quick_framework_scan(payload.message, contexts)
 
     async def event_generator():
         yield _sse(
@@ -412,30 +527,16 @@ async def chat_stream(payload: ChatRequest):
                 "riskLevel": risk_level,
                 "tags": tags,
                 "recommendations": recommendations,
+                "frameworkChecks": framework_checks_payload,
                 "retrievedCount": len(contexts),
             },
         )
 
         try:
             full_text: List[str] = []
-            source = "gemini"
             for text in gemini.stream_analysis(payload.message, _context_to_lines(contexts)):
                 full_text.append(text)
                 yield _sse("chunk", {"text": text})
-
-            full_reply = "".join(full_text)
-            try:
-                history_store = ChatHistoryStore()
-                history_store.save_interaction(
-                    question=payload.message,
-                    answer=full_reply,
-                    risk_level=risk_level,
-                    source=source,
-                    retrieved_count=len(contexts),
-                    created_at=created_at,
-                )
-            except ChatHistoryStoreError:
-                pass
 
             yield _sse(
                 "done",
@@ -445,25 +546,14 @@ async def chat_stream(payload: ChatRequest):
                     "riskLevel": risk_level,
                     "tags": tags,
                     "recommendations": recommendations,
-                    "reply": full_reply,
+                    "frameworkChecks": framework_checks_payload,
+                    "reply": "".join(full_text),
                 },
             )
         except GeminiGenerationError as exc:
             detail = str(exc)
             if _is_quota_error(detail):
                 fallback_reply = _build_fallback_reply(payload.message, contexts, detail)
-                try:
-                    history_store = ChatHistoryStore()
-                    history_store.save_interaction(
-                        question=payload.message,
-                        answer=fallback_reply,
-                        risk_level=risk_level,
-                        source="fallback",
-                        retrieved_count=len(contexts),
-                        created_at=created_at,
-                    )
-                except ChatHistoryStoreError:
-                    pass
                 yield _sse("chunk", {"text": fallback_reply})
                 yield _sse(
                     "done",
@@ -473,6 +563,7 @@ async def chat_stream(payload: ChatRequest):
                         "riskLevel": risk_level,
                         "tags": tags,
                         "recommendations": recommendations,
+                        "frameworkChecks": framework_checks_payload,
                         "reply": fallback_reply,
                     },
                 )
@@ -482,36 +573,16 @@ async def chat_stream(payload: ChatRequest):
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
-@app.get("/api/v1/chat/history", response_model=ChatHistoryResponse)
-async def chat_history(page: int = 1, pageSize: int = 10, q: str = "", sort: str = "newest"):
-    try:
-        history_store = ChatHistoryStore()
-        result = history_store.query_history(page=page, page_size=pageSize, keyword=q, sort=sort)
-        items = [ChatHistoryItem(**item) for item in result["items"]]
-        return ChatHistoryResponse(
-            total=int(result["total"]),
-            page=int(result["page"]),
-            pageSize=int(result["pageSize"]),
-            keyword=str(result["keyword"]),
-            sort=str(result["sort"]),
-            count=len(items),
-            items=items,
-        )
-    except ChatHistoryStoreError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-
 @app.get("/api/v1/risk-report", response_model=RiskReportResponse)
-async def risk_report(project: Optional[str] = None):
+async def risk_report():
     try:
         store = VectorKnowledgeStore()
         contexts = store.retrieve_context(
             query=os.getenv("RISK_REPORT_QUERY", "recent OWASP vulnerabilities and security incidents"),
             top_k=int(os.getenv("RISK_REPORT_TOP_K", "200")),
-            project=project,
         )
         records = [record_from_metadata(item.metadata) for item in contexts]
-        return RiskReportResponse(**build_risk_report(records, selected_project=project))
+        return RiskReportResponse(**build_risk_report(records))
     except VectorStoreConfigError:
         # Keep dashboard usable even when vector infra is not configured.
         return RiskReportResponse(**_build_empty_risk_report())

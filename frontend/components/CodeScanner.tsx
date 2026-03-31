@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import Editor from "react-simple-code-editor";
 import Prism from "prismjs";
 import "prismjs/components/prism-javascript";
@@ -14,26 +14,91 @@ import "prismjs/components/prism-cpp";
 import "prismjs/components/prism-csharp";
 
 import { sendChatMessage } from "@/lib/backend";
+import { ChatResponse } from "@/types";
 
-const DEFAULT_CODE = `// Welcome to ThreatLens Code Scanner!
-// Paste your code snippet here to let Gemini AI analyze it for security vulnerabilities.
-// Examples: API endpoints, raw queries, middleware config...
+type SupportedLanguage =
+  | "javascript"
+  | "typescript"
+  | "python"
+  | "java"
+  | "go"
+  | "c"
+  | "cpp"
+  | "csharp"
+  | "sql";
 
+const DEFAULT_SNIPPETS: Record<SupportedLanguage, string> = {
+  javascript: `// JavaScript sample
 function authenticateUser(req, res) {
   const { username, password } = req.body;
-  
-  // Vulnerable pattern example
   const query = "SELECT * FROM users WHERE username = '" + username + "' AND password = '" + password + "'";
   db.execute(query);
-}
-`;
+}`,
+  typescript: `// TypeScript sample
+type LoginInput = { username: string; password: string };
+
+async function login(input: LoginInput) {
+  const query = \`SELECT * FROM users WHERE username = '\${input.username}' AND password = '\${input.password}'\`;
+  return db.raw(query);
+}`,
+  python: `# Python sample
+def authenticate_user(conn, username, password):
+    query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'"
+    cursor = conn.cursor()
+    cursor.execute(query)
+    return cursor.fetchall()
+`,
+  java: `// Java sample
+public User login(Connection conn, String username, String password) throws Exception {
+    String sql = "SELECT * FROM users WHERE username = '" + username + "' AND password = '" + password + "'";
+    Statement stmt = conn.createStatement();
+    ResultSet rs = stmt.executeQuery(sql);
+    return mapUser(rs);
+}`,
+  go: `// Go sample
+func login(db *sql.DB, username string, password string) (*User, error) {
+  query := "SELECT id, username FROM users WHERE username = '" + username + "' AND password = '" + password + "'"
+  row := db.QueryRow(query)
+  var u User
+  err := row.Scan(&u.ID, &u.Username)
+  return &u, err
+}`,
+  c: `// C sample
+void build_query(char *out, const char *username, const char *password) {
+    sprintf(out, "SELECT * FROM users WHERE username='%s' AND password='%s'", username, password);
+}`,
+  cpp: `// C++ sample
+std::string buildQuery(const std::string& username, const std::string& password) {
+    return "SELECT * FROM users WHERE username='" + username + "' AND password='" + password + "'";
+}`,
+  csharp: `// C# sample
+public User Login(string username, string password)
+{
+    var sql = "SELECT * FROM Users WHERE Username = '" + username + "' AND Password = '" + password + "'";
+    using var cmd = new SqlCommand(sql, _conn);
+    using var reader = cmd.ExecuteReader();
+    return MapUser(reader);
+}`,
+  sql: `-- SQL sample
+SELECT *
+FROM users
+WHERE email = '$userEmail'
+  AND password = '$userPassword';`,
+};
 
 export default function CodeScanner() {
-  const [code, setCode] = useState(DEFAULT_CODE);
-  const [language, setLanguage] = useState("javascript");
+  const [language, setLanguage] = useState<SupportedLanguage>("javascript");
+  const [code, setCode] = useState(DEFAULT_SNIPPETS.javascript);
   const [isScanning, setIsScanning] = useState(false);
-  const [report, setReport] = useState<any>(null);
+  const [report, setReport] = useState<ChatResponse | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const handleLanguageChange = (nextLanguage: SupportedLanguage) => {
+    setLanguage(nextLanguage);
+    setCode(DEFAULT_SNIPPETS[nextLanguage]);
+    setReport(null);
+    setErrorMsg(null);
+  };
 
   const handleScan = async () => {
     if (!code.trim()) return;
@@ -84,7 +149,7 @@ ${code}
         <div style={{ display: 'flex', gap: '8px' }}>
           <select 
             value={language} 
-            onChange={(e) => setLanguage(e.target.value)}
+            onChange={(e) => handleLanguageChange(e.target.value as SupportedLanguage)}
             style={{ 
               background: 'var(--bg-secondary)', 
               color: 'var(--text-main)', 
@@ -212,7 +277,7 @@ ${code}
               <div style={{ marginTop: '20px' }}>
                 <strong style={{ display: 'block', marginBottom: '8px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>OWASP CHECKS</strong>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {report.frameworkChecks.map((chk: any, idx: number) => (
+                  {report.frameworkChecks.map((chk, idx: number) => (
                      <div key={idx} className={`risk-alert ${chk.severity}`}>
                         <div className="risk-alert-header">
                           <span style={{fontSize: '0.8rem'}}>{chk.title}</span>
@@ -221,6 +286,38 @@ ${code}
                      </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {(typeof report.confidenceScore === "number" || typeof report.needsHumanReview === "boolean") && (
+              <div style={{ marginTop: "20px" }}>
+                <strong style={{ display: "block", marginBottom: "8px", fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                  VERIFICATION
+                </strong>
+                <div style={{ fontSize: "0.82rem", lineHeight: 1.6, color: "#c4c4cb" }}>
+                  {typeof report.confidenceScore === "number" ? (
+                    <p style={{ margin: "0 0 6px" }}>Confidence Score: {report.confidenceScore.toFixed(2)}</p>
+                  ) : null}
+                  {typeof report.needsHumanReview === "boolean" ? (
+                    <p style={{ margin: 0 }}>Needs Human Review: {report.needsHumanReview ? "Yes" : "No"}</p>
+                  ) : null}
+                </div>
+              </div>
+            )}
+
+            {report.citations && report.citations.length > 0 && (
+              <div style={{ marginTop: "20px" }}>
+                <strong style={{ display: "block", marginBottom: "8px", fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                  CITATIONS
+                </strong>
+                <ul style={{ margin: 0, paddingLeft: "18px", fontSize: "0.8rem", color: "#a1a1aa" }}>
+                  {report.citations.map((citation) => (
+                    <li key={citation.id} style={{ marginBottom: "4px" }}>
+                      {citation.source} - {citation.category}
+                      {citation.cveId ? ` (${citation.cveId})` : ""}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </div>

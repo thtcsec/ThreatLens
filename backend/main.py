@@ -262,6 +262,50 @@ class TrustedFeedIngestHealthResponse(BaseModel):
     bySource: Dict[str, int]
     errors: List[str] = []
 
+
+class PolicyEvaluateRequest(BaseModel):
+    project: str = "unknown"
+    failOn: List[RiskLevel] = ["critical"]
+    maxHigh: int = 0
+    maxMedium: int = 5
+    maxLow: int = 999
+    findings: List[FrameworkCheck] = []
+
+
+class PolicyEvaluateResponse(BaseModel):
+    project: str
+    passed: bool
+    summary: Dict[str, int]
+    violations: List[str]
+    suggestedActions: List[str]
+    generatedAt: str
+
+
+class RemediationTask(BaseModel):
+    id: str
+    title: str
+    severity: RiskLevel
+    recommendation: str
+    owner: str
+    status: Literal["open", "in_progress", "done"] = "open"
+
+
+class RemediationTicketRequest(BaseModel):
+    project: str = "unknown"
+    owner: str = "security-team"
+    findings: List[FrameworkCheck] = []
+    context: Optional[str] = None
+
+
+class RemediationTicketResponse(BaseModel):
+    ticketId: str
+    project: str
+    priority: Literal["P0", "P1", "P2", "P3"]
+    title: str
+    summary: str
+    tasks: List[RemediationTask]
+    generatedAt: str
+
 # Cấu hình CORS
 app.add_middleware(
     CORSMiddleware,
@@ -286,6 +330,8 @@ async def root():
             "POST /api/v1/chat",
             "POST /api/v1/chat/stream",
             "GET /api/v1/chat/history",
+            "POST /api/v1/security/policy/evaluate",
+            "POST /api/v1/security/remediation/ticket",
         ],
     }
 
@@ -572,6 +618,25 @@ def _quick_framework_scan(message: str, contexts: List[RetrievedContext]) -> Lis
 
     # cap for UI
     return checks[:6]
+
+
+def _count_findings_by_severity(findings: List[FrameworkCheck]) -> Dict[str, int]:
+    summary = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    for item in findings:
+        sev = str(item.severity).lower()
+        if sev in summary:
+            summary[sev] += 1
+    return summary
+
+
+def _ticket_priority_from_findings(summary: Dict[str, int]) -> Literal["P0", "P1", "P2", "P3"]:
+    if summary.get("critical", 0) > 0:
+        return "P0"
+    if summary.get("high", 0) > 0:
+        return "P1"
+    if summary.get("medium", 0) > 0:
+        return "P2"
+    return "P3"
 
 
 def _build_empty_risk_report() -> Dict[str, Any]:
@@ -910,6 +975,93 @@ async def chat_history(
         )
     except ChatHistoryStoreError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/security/policy/evaluate", response_model=PolicyEvaluateResponse)
+async def security_policy_evaluate(payload: PolicyEvaluateRequest):
+    findings = payload.findings or []
+    summary = _count_findings_by_severity(findings)
+    violations: List[str] = []
+
+    fail_on = {str(level).lower() for level in (payload.failOn or ["critical"])}
+    for level in ["critical", "high", "medium", "low"]:
+        if level in fail_on and summary[level] > 0:
+            violations.append(f"Policy fail: found {summary[level]} {level} finding(s)")
+
+    if summary["high"] > payload.maxHigh:
+        violations.append(f"Policy fail: high findings {summary['high']} exceed maxHigh={payload.maxHigh}")
+    if summary["medium"] > payload.maxMedium:
+        violations.append(f"Policy fail: medium findings {summary['medium']} exceed maxMedium={payload.maxMedium}")
+    if summary["low"] > payload.maxLow:
+        violations.append(f"Policy fail: low findings {summary['low']} exceed maxLow={payload.maxLow}")
+
+    suggested_actions = [
+        "Block merge on policy failure and require remediation ticket creation.",
+        "Run scanner against changed files in CI for every pull request.",
+        "Add security regression tests for the affected modules.",
+    ]
+    if summary["critical"] > 0:
+        suggested_actions.insert(0, "Escalate immediately: critical findings detected (P0).")
+
+    return PolicyEvaluateResponse(
+        project=payload.project,
+        passed=len(violations) == 0,
+        summary=summary,
+        violations=violations,
+        suggestedActions=suggested_actions,
+        generatedAt=datetime.now(tz=timezone.utc).isoformat(),
+    )
+
+
+@app.post("/api/v1/security/remediation/ticket", response_model=RemediationTicketResponse)
+async def security_remediation_ticket(payload: RemediationTicketRequest):
+    findings = payload.findings or []
+    summary = _count_findings_by_severity(findings)
+    priority = _ticket_priority_from_findings(summary)
+    generated_at = datetime.now(tz=timezone.utc).isoformat()
+    ticket_id = f"rem-{int(datetime.now(tz=timezone.utc).timestamp() * 1000)}"
+
+    tasks: List[RemediationTask] = []
+    for idx, finding in enumerate(findings, start=1):
+        tasks.append(
+            RemediationTask(
+                id=f"{ticket_id}-task-{idx}",
+                title=f"{finding.title} ({finding.severity.upper()})",
+                severity=finding.severity,
+                recommendation=finding.recommendation,
+                owner=payload.owner,
+                status="open",
+            )
+        )
+
+    if not tasks:
+        tasks.append(
+            RemediationTask(
+                id=f"{ticket_id}-task-1",
+                title="Manual security review required",
+                severity="low",
+                recommendation="No findings were provided; run scanner and attach findings before closing this ticket.",
+                owner=payload.owner,
+                status="open",
+            )
+        )
+
+    summary_line = (
+        f"critical={summary['critical']}, high={summary['high']}, "
+        f"medium={summary['medium']}, low={summary['low']}"
+    )
+    if payload.context:
+        summary_line = f"{summary_line}. Context: {payload.context}"
+
+    return RemediationTicketResponse(
+        ticketId=ticket_id,
+        project=payload.project,
+        priority=priority,
+        title=f"[{priority}] Security remediation - {payload.project}",
+        summary=summary_line,
+        tasks=tasks,
+        generatedAt=generated_at,
+    )
 
 
 @app.get("/api/v1/risk-report", response_model=RiskReportResponse)

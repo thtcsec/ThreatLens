@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const INTERNAL_BACKEND_URL =
-  process.env.BACKEND_INTERNAL_URL || process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+  process.env.BACKEND_INTERNAL_URL || process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8001";
 const API_PREFIX = "/api/v1";
 
 interface BackendErrorPayload {

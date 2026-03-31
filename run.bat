@@ -1,6 +1,5 @@
 @echo off
 echo Starting ThreatLens Backend...
-start "ThreatLens Backend" cmd /k "cd backend && .venv\Scripts\activate && pip install -r requirements.txt && python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
-
+start "ThreatLens Backend" cmd /k "cd backend && .venv\Scripts\activate && pip install -r requirements.txt && python -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload"
 echo Starting ThreatLens Frontend...
 start "ThreatLens Frontend" cmd /k "cd frontend && npm install && npm run dev"

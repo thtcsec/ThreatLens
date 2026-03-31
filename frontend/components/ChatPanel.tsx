@@ -263,49 +263,69 @@ export default function ChatPanel() {
       <div className="chat-tabs">
         <button
           type="button"
-          className={activeTab === "chat" ? "active" : ""}
+          className={`tab-btn ${activeTab === "chat" ? "active" : ""}`}
           onClick={() => setActiveTab("chat")}
         >
-          Chat
+          <svg className="tab-icon" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+          </svg>
+          Scanner & Chat
         </button>
         <button
           type="button"
-          className={activeTab === "history" ? "active" : ""}
+          className={`tab-btn ${activeTab === "history" ? "active" : ""}`}
           onClick={() => setActiveTab("history")}
         >
-          History
-          <span className="history-badge">{historyTotal}</span>
+          <svg className="tab-icon" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          Logs Archives
+          {historyTotal > 0 && <span className="history-badge">{historyTotal}</span>}
         </button>
       </div>
 
       {activeTab === "history" ? (
         <section className="history-panel">
           <div className="history-controls">
-            <input
-              value={historyKeywordDraft}
-              onChange={(event) => setHistoryKeywordDraft(event.target.value)}
-              placeholder="Search question or answer"
-              aria-label="search history"
-            />
-            <select
-              value={historySort}
-              onChange={(event) => {
-                const next = event.target.value === "oldest" ? "oldest" : "newest";
-                setHistorySort(next);
-                setHistoryPage(1);
-              }}
-              aria-label="sort history"
-            >
-              <option value="newest">Newest</option>
-              <option value="oldest">Oldest</option>
-            </select>
-            <button
-              type="button"
-              onClick={() => setHistoryRefreshKey((prev) => prev + 1)}
-              disabled={historyLoading}
-            >
-              Refresh
-            </button>
+            <div className="search-wrap">
+              <svg className="search-icon" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+              </svg>
+              <input
+                className="history-search"
+                value={historyKeywordDraft}
+                onChange={(event) => setHistoryKeywordDraft(event.target.value)}
+                placeholder="Search specific CVE, CWE or keywords..."
+                aria-label="search history"
+              />
+            </div>
+            
+            <div className="history-actions">
+              <select
+                className="history-sort"
+                value={historySort}
+                onChange={(event) => {
+                  const next = event.target.value === "oldest" ? "oldest" : "newest";
+                  setHistorySort(next);
+                  setHistoryPage(1);
+                }}
+                aria-label="sort history"
+              >
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+              </select>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setHistoryRefreshKey((prev) => prev + 1)}
+                disabled={historyLoading}
+                title="Refresh logs"
+              >
+                <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                </svg>
+              </button>
+            </div>
           </div>
 
           {historyError ? <p className="stream-status error">{historyError}</p> : null}
@@ -316,17 +336,23 @@ export default function ChatPanel() {
           ) : (
             <div className="history-list">
               {historyItems.map((item) => (
-                <article key={item.id} className="history-item">
-                  <p className="history-meta">
-                    {new Date(item.createdAt).toLocaleString()} | Risk {item.riskLevel.toUpperCase()} | Source {item.source} |
-                    Retrieved {item.retrievedCount}
-                  </p>
-                  <p>
-                    <strong>Q:</strong> {item.question}
-                  </p>
-                  <p>
-                    <strong>A:</strong> {item.answer}
-                  </p>
+                <article key={item.id} className={`history-item risk-${item.riskLevel.toLowerCase()}`}>
+                  <div className="history-item-header">
+                    <span className={`risk-badge ${item.riskLevel.toLowerCase()}`}>
+                       {item.riskLevel.toUpperCase()}
+                    </span>
+                    <span className="history-meta">
+                      {new Date(item.createdAt).toLocaleString()} &bull; Source: {item.source.toUpperCase()} &bull; Contexts: {item.retrievedCount}
+                    </span>
+                  </div>
+                  <div className="history-item-body">
+                    <p className="q-text">
+                      <strong className="q-label">Q:</strong> {item.question}
+                    </p>
+                    <p className="a-text">
+                      <strong className="a-label">A:</strong> {item.answer?.substring(0, 180)}{item.answer?.length > 180 ? "..." : ""}
+                    </p>
+                  </div>
                 </article>
               ))}
             </div>
@@ -335,20 +361,24 @@ export default function ChatPanel() {
           <div className="history-pagination">
             <button
               type="button"
+              className="btn-page"
               disabled={historyPage <= 1 || historyLoading}
               onClick={() => setHistoryPage((prev) => Math.max(1, prev - 1))}
             >
-              Previous
+              <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+              Prev
             </button>
-            <span>
-              Page {historyPage} / {historyTotalPages}
+            <span className="page-indicator">
+              Page <strong>{historyPage}</strong> of {historyTotalPages}
             </span>
             <button
               type="button"
+              className="btn-page"
               disabled={historyPage >= historyTotalPages || historyLoading}
               onClick={() => setHistoryPage((prev) => Math.min(historyTotalPages, prev + 1))}
             >
               Next
+              <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
             </button>
           </div>
         </section>

@@ -11,6 +11,7 @@ import "prismjs/components/prism-java";
 import "prismjs/components/prism-go";
 import "prismjs/components/prism-c";
 import "prismjs/components/prism-cpp";
+import "prismjs/components/prism-csharp";
 
 import { sendChatMessage } from "@/lib/backend";
 
@@ -101,6 +102,7 @@ ${code}
             <option value="go">Go (Golang)</option>
             <option value="c">C</option>
             <option value="cpp">C++</option>
+            <option value="csharp">C#</option>
             <option value="sql">SQL</option>
           </select>
           <button 

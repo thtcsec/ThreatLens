@@ -51,4 +51,4 @@ npm install
 npm run dev
 \`\`\`
 
-<p align="center"><i>🏆 <b>Giải Ba (2nd Runner Up) - GDGOC SAU 2024</b>. Phát triển bởi team <b>QuantumBug</b> (Hoàng Tú & Tấn Thắng) - Trường Đại học Sài Gòn.</i></p>
+<p align="center"><i>🏆 <b>Giải Ba (2nd Runner Up) - GDGOC SAU 2026</b>. Phát triển bởi team <b>QuantumBug</b> (Hoàng Tú & Tấn Thắng) - Trường Đại học Sài Gòn.</i></p>

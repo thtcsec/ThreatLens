@@ -10,6 +10,7 @@ export default function HomePage() {
       <section className="header card">
         <h1 className="title">ThreatLens Copilot</h1>
         <p className="subtitle">
+          <span className="award-badge">🏆 2nd Runner Up - GDGOC SAU</span>
           Intelligent Cloud-Native Security Operations. Analyze risks and protect your codebase with real-time AI guidance.
         </p>
       </section>

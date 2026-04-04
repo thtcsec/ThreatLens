@@ -3,6 +3,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Team-QuantumBug-green?style=for-the-badge" alt="Team">
   <img src="https://img.shields.io/badge/Competition-GDGOC%20SAU-blue?style=for-the-badge" alt="Hackathon">
+  <img src="https://img.shields.io/badge/Award-2nd%20Runner%20Up-orange?style=for-the-badge" alt="Award">
   <img src="https://img.shields.io/badge/Powered%20By-Google%20Gemini-vibrant?style=for-the-badge" alt="AI Model">
   <img src="https://img.shields.io/badge/Tech-Next.js%20|%20FastAPI-black?style=for-the-badge" alt="Stack">
 </p>
@@ -50,4 +51,4 @@ npm install
 npm run dev
 \`\`\`
 
-<p align="center"><i>Phát triển bởi team <b>QuantumBug</b> (Hoàng Tú & Tấn Thắng) - Trường Đại học Sài Gòn.</i></p>
+<p align="center"><i>🏆 <b>Giải Ba (2nd Runner Up) - GDGOC SAU 2024</b>. Phát triển bởi team <b>QuantumBug</b> (Hoàng Tú & Tấn Thắng) - Trường Đại học Sài Gòn.</i></p>

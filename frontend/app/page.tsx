@@ -1,6 +1,8 @@
 import ChatPanel from "@/components/ChatPanel";
 import RiskDashboard from "@/components/RiskDashboard";
 import CodeScanner from "@/components/CodeScanner";
+import KnowledgeManager from "@/components/KnowledgeManager";
+import RemediationPanel from "@/components/RemediationPanel";
 
 export default function HomePage() {
   return (
@@ -19,9 +21,15 @@ export default function HomePage() {
           <RiskDashboard />
         </div>
         
-        {/* Bottom Row: Full Width Scanner */}
+        {/* Middle Row: Full Width Scanner */}
         <div className="bottom-row">
           <CodeScanner />
+        </div>
+
+        {/* Bottom Row: Knowledge & Policy */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+          <KnowledgeManager />
+          <RemediationPanel />
         </div>
       </section>
     </main>

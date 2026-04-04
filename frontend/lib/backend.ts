@@ -198,3 +198,64 @@ export async function streamChatMessage(
     }
   }
 }
+
+export async function getKnowledgeHealth(): Promise<import("@/types").TrustedFeedIngestHealthResponse> {
+  const response = await fetch(`${FRONTEND_API_PREFIX}/knowledge/ingest/health`, {
+    method: "GET",
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    return parseBackendError(response, "Knowledge health endpoint");
+  }
+
+  return (await response.json()) as import("@/types").TrustedFeedIngestHealthResponse;
+}
+
+export async function triggerKnowledgeIngest(payload: { includeNvd: boolean; includeCisaKev: boolean; days: number; limitPerFeed: number; project: string }): Promise<import("@/types").TrustedFeedIngestResponse> {
+  const response = await fetch(`${FRONTEND_API_PREFIX}/knowledge/ingest`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    return parseBackendError(response, "Knowledge ingest endpoint");
+  }
+
+  return (await response.json()) as import("@/types").TrustedFeedIngestResponse;
+}
+
+export async function evaluateSecurityPolicy(payload: { project: string; failOn: import("@/types").RiskLevel[]; maxHigh: number; maxMedium: number; maxLow: number; findings: import("@/types").FrameworkCheck[] }): Promise<import("@/types").PolicyEvaluateResponse> {
+  const response = await fetch(`${FRONTEND_API_PREFIX}/security/policy/evaluate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    return parseBackendError(response, "Policy evaluate endpoint");
+  }
+
+  return (await response.json()) as import("@/types").PolicyEvaluateResponse;
+}
+
+export async function createRemediationTicket(payload: { project: string; owner: string; findings: import("@/types").FrameworkCheck[]; context?: string }): Promise<import("@/types").RemediationTicketResponse> {
+  const response = await fetch(`${FRONTEND_API_PREFIX}/security/remediation/ticket`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    return parseBackendError(response, "Remediation ticket endpoint");
+  }
+
+  return (await response.json()) as import("@/types").RemediationTicketResponse;
+}

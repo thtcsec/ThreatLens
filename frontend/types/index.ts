@@ -129,3 +129,47 @@ export interface ChatStreamMeta {
   citations: ChatCitation[];
   retrievedCount: number;
 }
+
+export interface TrustedFeedIngestHealthResponse {
+  hasRun: boolean;
+  lastIngestAt?: string | null;
+  totalFetched: number;
+  totalUpserted: number;
+  bySource: Record<string, number>;
+  errors: string[];
+}
+
+export interface TrustedFeedIngestResponse {
+  totalFetched: number;
+  totalUpserted: number;
+  bySource: Record<string, number>;
+  errors: string[];
+}
+
+export interface PolicyEvaluateResponse {
+  project: string;
+  passed: boolean;
+  summary: Record<string, number>;
+  violations: string[];
+  suggestedActions: string[];
+  generatedAt: string;
+}
+
+export interface RemediationTask {
+  id: string;
+  title: string;
+  severity: RiskLevel;
+  recommendation: string;
+  owner: string;
+  status: "open" | "in_progress" | "done";
+}
+
+export interface RemediationTicketResponse {
+  ticketId: string;
+  project: string;
+  priority: "P0" | "P1" | "P2" | "P3";
+  title: string;
+  summary: string;
+  tasks: RemediationTask[];
+  generatedAt: string;
+}
